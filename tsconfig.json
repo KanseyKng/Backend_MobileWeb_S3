@@ -1,0 +1,33 @@
+{
+  // Visit https://aka.ms/tsconfig to read more about this file
+  "compilerOptions": {
+    // File Layout (Saya aktifkan sesuai permintaan dari gambar)
+    "rootDir": "./src",
+    "outDir": "./dist",
+
+    // Environment Settings (Saya ubah mengikuti gambar)
+    "module": "commonjs",        // Berubah dari "nodenext"
+    "target": "es2016",          // Berubah dari "esnext"
+    "esModuleInterop": true,     // TAMBAHAN dari gambar
+    "forceConsistentCasingInFileNames": true, // TAMBAHAN dari gambar
+    "types": ["node"],
+
+    // Other Outputs
+    "sourceMap": true,
+    "declaration": true,
+    "declarationMap": true,
+
+    // Stricter Typechecking Options
+    "noUncheckedIndexedAccess": true,
+    "exactOptionalPropertyTypes": true,
+
+    // Recommended Options
+    "strict": true,
+    "jsx": "react-jsx",
+    "verbatimModuleSyntax": true,
+    "isolatedModules": true,
+    "noUncheckedSideEffectImports": true,
+    "moduleDetection": "force",
+    "skipLibCheck": true
+  }
+}
