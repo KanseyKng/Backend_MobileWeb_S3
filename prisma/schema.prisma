@@ -24,3 +24,20 @@ model User {
 
   @@map("users")
 }
+
+
+
+model Product {
+  id          String   @id @default(cuid())
+  name        String
+  category    String
+  price       Int      // Harga dalam angka (misal 35000)
+  stock       Int
+  description String?
+  sku         String   @unique
+  imageUrl    String?  // Bisa diisi URL gambar
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@map("products")
+}
