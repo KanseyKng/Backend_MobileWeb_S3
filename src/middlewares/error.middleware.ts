@@ -2,9 +2,7 @@
 import type { Request, Response, NextFunction } from 'express';
 import { Prisma } from '@prisma/client';
 
-/**
- * Handler error global
- */
+// ✅ Handler Error Global
 export const errorMiddleware = (
   err: any,
   req: Request,
@@ -45,9 +43,7 @@ export const errorMiddleware = (
   });
 };
 
-/**
- * Handler 404 Not Found
- */
+// ✅ Handler 404 Not Found (Dipanggil saat route tidak ada)
 export const notFoundMiddleware = (req: Request, res: Response) => {
   res.status(404).json({
     success: false,
