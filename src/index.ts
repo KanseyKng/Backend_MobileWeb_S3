@@ -2,6 +2,7 @@
 import express from 'express';
 import cors from 'cors';
 import morgan from 'morgan';
+import path from 'path';
 import { env } from './config/env';
 import { connectDatabase } from './config/database';
 import { routes } from './routes';
@@ -12,10 +13,13 @@ const app = express();
 // ============================================================
 // MIDDLEWARE GLOBAL
 // ============================================================
-app.use(cors());                                    // CORS untuk web/mobile
-app.use(express.json());                            // Parse JSON body
-app.use(express.urlencoded({ extended: true }));    // Parse URL-encoded
-app.use(morgan('dev'));                             // Logger
+app.use(cors());
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
+app.use(morgan('dev'));
+
+// ✅ Static files untuk folder uploads
+app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
 
 // ============================================================
 // HEALTH CHECK
@@ -32,6 +36,7 @@ app.get('/', (req, res) => {
       logout: 'POST /api/auth/logout',
       me: 'GET /api/auth/me',
       adminUsers: 'GET /api/admin/users (khusus ADMIN)',
+      notifications: 'GET /api/notifications (khusus login)',
     },
   });
 });
