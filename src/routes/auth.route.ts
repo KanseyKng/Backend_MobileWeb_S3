@@ -5,15 +5,23 @@ import {
   login,
   logout,
   getMe,
+  updateProfile,
+  getSettings,
+  updateSettings,
 } from '../controllers/auth.controller';
 import { authMiddleware } from '../middlewares/auth.middleware';
 
 export const authRouter = Router();
 
-// ============ PUBLIC ROUTES ============
+// PUBLIC
 authRouter.post('/register', register);
 authRouter.post('/login', login);
 
-// ============ PROTECTED ROUTES ============
+// PROTECTED
 authRouter.post('/logout', authMiddleware, logout);
 authRouter.get('/me', authMiddleware, getMe);
+
+// ✅ ENDPOINT BARU
+authRouter.put('/profile', authMiddleware, updateProfile);
+authRouter.get('/settings', getSettings);
+authRouter.put('/settings', authMiddleware, updateSettings);
