@@ -8,7 +8,7 @@ import type { AuthRequest } from '../middlewares/auth.middleware';
 import { roleMiddleware } from '../middlewares/role.middleware';
 import { prisma } from '../config/database';
 import { successResponse, errorResponse } from '../utils/response';
-import { APP_CONFIG } from '../config/app.config'; // ✅ Import config
+import { APP_CONFIG } from '../config/app.config';
 
 export const transactionRouter = Router();
 
@@ -58,7 +58,6 @@ transactionRouter.post('/upload-proof/:orderId', upload.single('proof'), async (
   try {
     if (!req.file) return errorResponse(res, 'File bukti tidak ditemukan', 400);
 
-    // ✅ Gunakan APP_CONFIG.BASE_URL dari .env
     const fileUrl = `${APP_CONFIG.BASE_URL}/uploads/${req.file.filename}`;
 
     const updated = await prisma.transaction.update({
@@ -72,34 +71,71 @@ transactionRouter.post('/upload-proof/:orderId', upload.single('proof'), async (
   }
 });
 
-// 3. GET /api/transactions
+// 3. GET /api/transactions (dengan logika Auto-Selesai H+3)
 transactionRouter.get('/', authMiddleware, async (req: AuthRequest, res) => {
   try {
+    // ✅ Auto-Selesai H+3
+    const threeDaysAgo = new Date();
+    threeDaysAgo.setDate(threeDaysAgo.getDate() - 3);
+
+    const shippedTransactions = await prisma.transaction.findMany({
+      where: {
+        status: 'Dikirim',
+        updatedAt: { lte: threeDaysAgo },
+      },
+    });
+
+    if (shippedTransactions.length > 0) {
+      await Promise.all(
+        shippedTransactions.map(async (trx) => {
+          await prisma.transaction.update({
+            where: { id: trx.id },
+            data: { status: 'Selesai' },
+          });
+          await prisma.notification.create({
+            data: {
+              title: 'Pesanan Selesai Otomatis',
+              message: `Pesanan #${trx.orderId} telah otomatis selesai karena sudah 3 hari sejak dikirim.`,
+              category: 'Pengiriman',
+              relatedId: trx.id,
+            },
+          });
+        })
+      );
+    }
+
     const transactions = await prisma.transaction.findMany({
       orderBy: { createdAt: 'desc' },
     });
+
     return successResponse(res, transactions, 'Berhasil ambil transaksi');
   } catch (error) {
+    console.error(error);
     return errorResponse(res, 'Gagal ambil transaksi', 500);
   }
 });
 
-// 4. PUT /api/transactions/:id
+// 4. PUT /api/transactions/:id (Admin TIDAK BISA set "Selesai")
 transactionRouter.put('/:id', authMiddleware, async (req: AuthRequest, res: Response) => {
   try {
     const { status } = req.body;
     if (!status) return errorResponse(res, 'Status wajib diisi', 400);
+
+    // ✅ Validasi: Admin TIDAK BOLEH set "Selesai"
+    if (status === 'Selesai') {
+      return errorResponse(res, 'Status "Selesai" hanya bisa diubah oleh Customer atau Auto-Selesai H+3.', 403);
+    }
 
     const updated = await prisma.transaction.update({
       where: { id: req.params.id },
       data: { status },
     });
 
-    if (status === 'Dikirim' || status === 'Selesai') {
+    if (status === 'Dikirim') {
       await prisma.notification.create({
         data: {
-          title: status === 'Dikirim' ? 'Pesanan Telah Dikirim' : 'Pesanan Selesai',
-          message: `Pesanan #${updated.orderId} telah ${status === 'Dikirim' ? 'diserahkan ke kurir' : 'diselesaikan'}.`,
+          title: 'Pesanan Telah Dikirim',
+          message: `Pesanan #${updated.orderId} telah diserahkan ke kurir.`,
           category: 'Pengiriman',
           relatedId: updated.id,
         },
