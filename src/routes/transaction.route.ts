@@ -8,7 +8,7 @@ import type { AuthRequest } from '../middlewares/auth.middleware';
 import { roleMiddleware } from '../middlewares/role.middleware';
 import { prisma } from '../config/database';
 import { successResponse, errorResponse } from '../utils/response';
-import { APP_CONFIG } from '../config/app.config';
+import { APP_CONFIG } from '../config/app.config'; // ✅ Import config
 
 export const transactionRouter = Router();
 
@@ -22,7 +22,6 @@ const upload = multer({ storage });
 transactionRouter.post('/checkout', authMiddleware, async (req: AuthRequest, res: Response) => {
   try {
     const { customerName, customerPhone, customerAddress, items, totalPrice, paymentMethod } = req.body;
-    
     const orderId = `TRX-${Date.now().toString().slice(-6)}`;
 
     let itemsJson = '';
@@ -35,19 +34,9 @@ transactionRouter.post('/checkout', authMiddleware, async (req: AuthRequest, res
     }
 
     const newTransaction = await prisma.transaction.create({
-      data: {
-        orderId,
-        customerName,
-        customerPhone,
-        customerAddress,
-        items: itemsJson,
-        totalPrice,
-        paymentMethod,
-        status: 'Menunggu Verifikasi',
-      },
+      data: { orderId, customerName, customerPhone, customerAddress, items: itemsJson, totalPrice, paymentMethod, status: 'Menunggu Verifikasi' },
     });
 
-    // ✅ OTOMATIS BUAT NOTIFIKASI PESANAN BARU
     await prisma.notification.create({
       data: {
         title: 'Pesanan Baru Diterima',
@@ -69,6 +58,7 @@ transactionRouter.post('/upload-proof/:orderId', upload.single('proof'), async (
   try {
     if (!req.file) return errorResponse(res, 'File bukti tidak ditemukan', 400);
 
+    // ✅ Gunakan APP_CONFIG.BASE_URL dari .env
     const fileUrl = `${APP_CONFIG.BASE_URL}/uploads/${req.file.filename}`;
 
     const updated = await prisma.transaction.update({
@@ -105,7 +95,6 @@ transactionRouter.put('/:id', authMiddleware, async (req: AuthRequest, res: Resp
       data: { status },
     });
 
-    // ✅ OTOMATIS BUAT NOTIFIKASI JIKA STATUS BERUBAH KE DIKIRIM/SELESAI
     if (status === 'Dikirim' || status === 'Selesai') {
       await prisma.notification.create({
         data: {
