@@ -9,18 +9,32 @@ import type { AuthRequest } from '../middlewares/auth.middleware';
 import { roleMiddleware } from '../middlewares/role.middleware';
 import { prisma } from '../config/database';
 import { successResponse, errorResponse } from '../utils/response';
-import { APP_CONFIG } from '../config/app.config';
+import { uploadToCloudinary } from '../utils/cloudinary';
 
 export const productRouter = Router();
 
-const storage = multer.diskStorage({
-  destination: (_req, _file, cb) => cb(null, 'uploads/'),
-  filename: (_req, file, cb) => {
-    const safeName = file.originalname.replace(/[^a-zA-Z0-9.]/g, '_');
-    cb(null, `prod-${Date.now()}-${safeName}`);
-  },
-});
+// ✅ HELPER: Kirim notifikasi ke semua Admin
+async function notifyAdmins(title: string, message: string, category: string, relatedId?: string) {
+  try {
+    const admins = await prisma.user.findMany({ where: { role: 'ADMIN' }, select: { id: true } });
+    if (admins.length === 0) {
+      console.log('❌ Gagal kirim notif: Tidak ada user dengan role ADMIN');
+      return;
+    }
+    await Promise.all(
+      admins.map((admin) =>
+        prisma.notification.create({
+          data: { userId: admin.id, title, message, category, relatedId },
+        })
+      )
+    );
+    console.log(`✅ Notifikasi Stok dikirim ke ${admins.length} Admin.`);
+  } catch (error) {
+    console.error('Gagal mengirim notifikasi ke admin:', error);
+  }
+}
 
+const storage = multer.memoryStorage();
 const upload = multer({
   storage,
   limits: { fileSize: 5 * 1024 * 1024 },
@@ -29,7 +43,7 @@ const upload = multer({
     const ext = allowed.test(path.extname(file.originalname).toLowerCase());
     const mime = allowed.test(file.mimetype);
     if (ext && mime) cb(null, true);
-    else cb(new Error('Hanya file gambar (JPG, PNG, WEBP) yang diizinkan!'));
+    else cb(new Error('Hanya file gambar (JPG, PNG, WEBP, GIF) yang diizinkan!'));
   },
 });
 
@@ -41,7 +55,6 @@ const ProductSchema = z.object({
   description: z.string().optional().default(''),
 });
 
-// GET
 productRouter.get('/', async (_req, res) => {
   try {
     const products = await prisma.product.findMany({ orderBy: { createdAt: 'desc' } });
@@ -51,7 +64,6 @@ productRouter.get('/', async (_req, res) => {
   }
 });
 
-// POST
 productRouter.post(
   '/',
   authMiddleware,
@@ -61,88 +73,111 @@ productRouter.post(
     try {
       const parsed = ProductSchema.safeParse(req.body);
       if (!parsed.success) {
-        return res.status(422).json({
-          success: false,
-          message: 'Validasi gagal',
-          errors: parsed.error.flatten().fieldErrors,
-        });
+        return res.status(422).json({ success: false, message: 'Validasi gagal', errors: parsed.error.flatten().fieldErrors });
       }
 
       const { name, category, price, stock, description } = parsed.data;
       const sku = `PRD-${Date.now().toString().slice(-6)}`;
-      const imageUrl = req.file ? `${APP_CONFIG.BASE_URL}/uploads/${req.file.filename}` : null;
+      
+      let imageUrl = null;
+      if (req.file) {
+        imageUrl = await uploadToCloudinary(req.file.buffer, 'ikobana/products');
+      }
 
       const newProduct = await prisma.product.create({
         data: { name, category, price, stock, description, sku, imageUrl },
       });
 
-      // ✅ OTOMATIS BUAT NOTIFIKASI JIKA STOK AWAL < 10
-      if (stock < 10) {
-        await prisma.notification.create({
-          data: {
-            title: 'Peringatan Stok Produk',
-            message: `Stok ${name} tersisa ${stock} unit. Segera lakukan pengisian stok.`,
-            category: 'Stok Produk',
-            relatedId: newProduct.id,
-          },
-        });
+      if (newProduct.stock < 5) {
+        await notifyAdmins(
+          'Peringatan Stok Menipis',
+          `Stok produk "${newProduct.name}" tersisa ${newProduct.stock} unit. Segera lakukan restock!`,
+          'Stok Produk',
+          newProduct.id
+        );
       }
 
       return successResponse(res, newProduct, 'Produk berhasil ditambahkan', 201);
-    } catch (error) {
-      console.error(error);
-      return errorResponse(res, 'Gagal menambah produk', 500);
+    } catch (error: any) {
+      console.error('❌ ERROR TAMBAH PRODUK:', error.message);
+      return errorResponse(res, error.message || 'Gagal menambah produk', 500);
     }
   }
 );
 
-// DELETE
-productRouter.delete(
+// ✅ PERBAIKAN MUTLAK: Pindahkan bulk-update-stock KE ATAS /:id
+productRouter.put('/bulk-update-stock', authMiddleware, roleMiddleware('ADMIN'), async (req: AuthRequest, res: Response) => {
+  try {
+    const { updates } = req.body;
+    if (!Array.isArray(updates)) return errorResponse(res, 'Format tidak valid', 400);
+
+    for (const u of updates) {
+      // Konversi ke angka untuk memastikan tidak error saat masuk ke database
+      const newStock = Number(u.newStock); 
+      if (isNaN(newStock)) continue;
+
+      const updatedProduct = await prisma.product.update({ 
+        where: { id: u.id }, 
+        data: { stock: newStock } 
+      });
+      
+      if (updatedProduct.stock < 5) {
+        await notifyAdmins(
+          'Peringatan Stok Menipis',
+          `Stok produk "${updatedProduct.name}" tersisa ${updatedProduct.stock} unit. Segera lakukan restock!`,
+          'Stok Produk',
+          updatedProduct.id
+        );
+      }
+    }
+    return successResponse(res, null, 'Stok berhasil diperbarui');
+  } catch (error: any) {
+    console.error('❌ ERROR BULK UPDATE STOK:', error.message); // Tampilkan error asli di terminal
+    return errorResponse(res, 'Gagal update stok', 500);
+  }
+});
+
+// ✅ Route /:id aman di bawah bulk-update-stock
+productRouter.put(
   '/:id',
   authMiddleware,
   roleMiddleware('ADMIN'),
+  upload.single('image'),
   async (req: AuthRequest, res: Response) => {
     try {
-      await prisma.product.delete({ where: { id: req.params.id } });
-      return successResponse(res, null, 'Produk berhasil dihapus');
-    } catch (error) {
-      return errorResponse(res, 'Gagal menghapus produk', 500);
-    }
-  }
-);
+      const { id } = req.params;
+      const { name, category, price, stock, description } = req.body;
 
-// PUT Bulk Update Stock
-productRouter.put(
-  '/bulk-update-stock',
-  authMiddleware,
-  roleMiddleware('ADMIN'),
-  async (req: AuthRequest, res: Response) => {
-    try {
-      const { updates } = req.body;
-      if (!Array.isArray(updates)) return errorResponse(res, 'Format tidak valid', 400);
+      const updateData: any = { name, category, price: Number(price), stock: Number(stock), description };
 
-      for (const u of updates) {
-        const updatedProduct = await prisma.product.update({
-          where: { id: u.id },
-          data: { stock: u.newStock },
-        });
-
-        // ✅ OTOMATIS BUAT NOTIFIKASI JIKA STOK MENJADI < 10
-        if (updatedProduct.stock < 10) {
-          await prisma.notification.create({
-            data: {
-              title: 'Peringatan Stok Produk',
-              message: `Stok ${updatedProduct.name} tersisa ${updatedProduct.stock} unit. Segera lakukan pengisian stok.`,
-              category: 'Stok Produk',
-              relatedId: updatedProduct.id,
-            },
-          });
-        }
+      if (req.file) {
+        updateData.imageUrl = await uploadToCloudinary(req.file.buffer, 'ikobana/products');
       }
 
-      return successResponse(res, null, 'Stok berhasil diperbarui');
-    } catch (error) {
-      return errorResponse(res, 'Gagal update stok', 500);
+      const updated = await prisma.product.update({ where: { id }, data: updateData });
+
+      if (updated.stock < 5) {
+        await notifyAdmins(
+          'Peringatan Stok Menipis',
+          `Stok produk "${updated.name}" tersisa ${updated.stock} unit. Segera lakukan restock!`,
+          'Stok Produk',
+          updated.id
+        );
+      }
+
+      return successResponse(res, updated, 'Produk berhasil diperbarui');
+    } catch (error: any) {
+      console.error('❌ ERROR EDIT PRODUK:', error.message);
+      return errorResponse(res, error.message || 'Gagal memperbarui produk', 500);
     }
   }
 );
+
+productRouter.delete('/:id', authMiddleware, roleMiddleware('ADMIN'), async (req: AuthRequest, res: Response) => {
+  try {
+    await prisma.product.delete({ where: { id: req.params.id } });
+    return successResponse(res, null, 'Produk berhasil dihapus');
+  } catch (error) {
+    return errorResponse(res, 'Gagal menghapus produk', 500);
+  }
+});
