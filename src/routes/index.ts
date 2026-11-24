@@ -5,7 +5,9 @@ import { productRouter } from './product.route';
 import { transactionRouter } from './transaction.route';
 import { adminRouter } from './admin.route';
 import { notificationRouter } from './notification.route';
-import { addressRouter } from './address.route'; // ✅ BARU
+import { addressRouter } from './address.route';
+import { wishlistRouter } from './wishlist.route';
+import { chatbotRouter } from './chatbot.route';
 
 export const routes = Router();
 
@@ -14,4 +16,6 @@ routes.use('/products', productRouter);
 routes.use('/transactions', transactionRouter);
 routes.use('/admin', adminRouter);
 routes.use('/notifications', notificationRouter);
-routes.use('/addresses', addressRouter); // ✅ BARU
+routes.use('/addresses', addressRouter);
+routes.use('/wishlists', wishlistRouter);
+routes.use('/chat', chatbotRouter);
