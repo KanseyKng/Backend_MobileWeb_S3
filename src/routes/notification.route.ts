@@ -8,10 +8,16 @@ import { successResponse, errorResponse } from '../utils/response';
 
 export const notificationRouter = Router();
 
+// ✅ GET Notifikasi (Difilter berdasarkan User yang login)
 notificationRouter.get('/', authMiddleware, async (req: AuthRequest, res: Response) => {
   try {
+    const userId = req.user?.userId;
+    if (!userId) return errorResponse(res, 'User tidak valid', 401);
+
     const { category, search, startDate, endDate, status } = req.query;
-    const where: any = {};
+    
+    // ✅ WAJIB: Filter berdasarkan userId
+    const where: any = { userId: userId };
 
     if (category && category !== 'Semua') where.category = category;
     if (status === 'read') where.isRead = true;
@@ -42,17 +48,32 @@ notificationRouter.get('/', authMiddleware, async (req: AuthRequest, res: Respon
   }
 });
 
-notificationRouter.get('/unread-count', authMiddleware, async (_req, res) => {
+// ✅ GET Unread Count (Difilter berdasarkan User)
+notificationRouter.get('/unread-count', authMiddleware, async (req: AuthRequest, res) => {
   try {
-    const count = await prisma.notification.count({ where: { isRead: false } });
+    const userId = req.user?.userId;
+    if (!userId) return errorResponse(res, 'User tidak valid', 401);
+
+    const count = await prisma.notification.count({ where: { userId, isRead: false } });
     return successResponse(res, { count }, 'Berhasil ambil jumlah unread');
   } catch (error) {
     return errorResponse(res, 'Gagal ambil unread', 500);
   }
 });
 
+// ✅ Mark as Read (Satu Notifikasi)
 notificationRouter.put('/:id/read', authMiddleware, async (req: AuthRequest, res: Response) => {
   try {
+    const userId = req.user?.userId;
+    if (!userId) return errorResponse(res, 'User tidak valid', 401);
+
+    // Pastikan notifikasi milik user ini
+    const notif = await prisma.notification.findFirst({
+      where: { id: req.params.id, userId }
+    });
+
+    if (!notif) return errorResponse(res, 'Notifikasi tidak ditemukan', 404);
+
     await prisma.notification.update({
       where: { id: req.params.id },
       data: { isRead: true },
@@ -63,23 +84,37 @@ notificationRouter.put('/:id/read', authMiddleware, async (req: AuthRequest, res
   }
 });
 
-notificationRouter.put('/read-all', authMiddleware, async (_req, res) => {
+// ✅ Mark All as Read (Semua Notifikasi Milik User)
+notificationRouter.put('/read-all', authMiddleware, async (req: AuthRequest, res) => {
   try {
-    await prisma.notification.updateMany({ data: { isRead: true } });
+    const userId = req.user?.userId;
+    if (!userId) return errorResponse(res, 'User tidak valid', 401);
+
+    await prisma.notification.updateMany({ 
+      where: { userId }, // ✅ Hanya update milik user ini
+      data: { isRead: true } 
+    });
     return successResponse(res, null, 'Semua notifikasi ditandai sudah dibaca');
   } catch (error) {
     return errorResponse(res, 'Gagal update notifikasi', 500);
   }
 });
 
-notificationRouter.delete('/old', authMiddleware, async (_req, res) => {
+// ✅ Delete Old Notifications (Difilter berdasarkan User)
+notificationRouter.delete('/old', authMiddleware, async (req: AuthRequest, res) => {
   try {
+    const userId = req.user?.userId;
+    if (!userId) return errorResponse(res, 'User tidak valid', 401);
+
     const startOfMonth = new Date();
     startOfMonth.setDate(1);
     startOfMonth.setHours(0, 0, 0, 0);
 
     const deleted = await prisma.notification.deleteMany({
-      where: { createdAt: { lt: startOfMonth } },
+      where: { 
+        userId, // ✅ Hanya hapus milik user ini
+        createdAt: { lt: startOfMonth } 
+      },
     });
 
     return successResponse(res, { deleted: deleted.count }, 'Notifikasi lama dihapus');
